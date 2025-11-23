@@ -6,9 +6,11 @@
 // @author       Volodymyr_Romanovych
 // @match        https://farmy.live/*
 // @grant        none
+// @icon         blob:https://web.telegram.org/9588e7b6-8bd2-4a57-a947-2c8f750b1fe1
+// @downloadURL  https://github.com/Vladimir199246/Farm-Land-/blob/main/Auto%20Quest
+// @updateURL    https://github.com/Vladimir199246/Farm-Land-/blob/main/Auto%20Quest
 // @run-at       document-idle
 // ==/UserScript==
-
 (function() {
     'use strict';
 
