@@ -23,7 +23,7 @@
     let totalAdWatches = 0;
     const MAX_TOTAL_ADS = 100;
     let isRunning = true;
-    const MIN_DELAY = 11000;
+    const MIN_DELAY = 13000;
     const MAX_DELAY = 20000;
     let lastAdTime = 0;
     let currentDelay = 0;
@@ -749,7 +749,7 @@
             text-align: center;
             margin-top: 3px;
         `;
-        infoText.innerHTML = '🎲 Затримка 11-20 секунд | 🛡️ Захищений режим';
+        infoText.innerHTML = '🎲 Затримка 13-20 секунд | 🛡️ Захищений режим';
 
         container.appendChild(title);
         container.appendChild(progressContainer);
