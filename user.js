@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Farm Land Auto Quest & Ads Claim (100 Max) - Enhanced
 // @namespace    http://tampermonkey.net/
-// @version      1.31
+// @version      1.32
 // @description  Покращена версія з виправленнями помилок та додатковими функціями
 // @author       Volodymyr_Romanovych
 // @match        https://farmy.live/*
@@ -349,7 +349,7 @@
                     console.log(`Переглядаємо рекламу (${totalAdWatches}/${MAX_TOTAL_ADS}), наступна затримка: ${Math.round(nextDelay/1000)}с`);
 
                     // Очікування завершення реклами
-                    await wait(40000); // 40 секунди
+                    await wait(41000); // 41 секунди
 
                     isWatchingAd = false;
                     currentDelay = nextDelay;
@@ -681,7 +681,7 @@
         `;
 
         const title = document.createElement('div');
-        title.innerHTML = '🎲 Farm Land Auto (100 Max) v1.31';
+        title.innerHTML = '🎲 Farm Land Auto (100 Max) v1.32';
         title.style.cssText = `
             color: white;
             font-weight: bold;
@@ -807,7 +807,7 @@
     window.stopAutoClaim = stopAutoClaim;
     window.resetAutoCounters = resetCounters;
 
-    console.log('Farm Land Auto Quest & Ads Claim (100 Max) - Enhanced v1.31 активовано!');
+    console.log('Farm Land Auto Quest & Ads Claim (100 Max) - Enhanced v1.32 активовано!');
     console.log('🛡️ Захищений режим | 🎲 Випадкові затримки | 💾 Автозбереження');
 
     init();
