@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Farm Land Auto Quest & Ads Claim (100 Max) - Enhanced
+// @name         Farm Land Auto Quest & Ads Claim - Ultimate Edition v1.51
 // @namespace    http://tampermonkey.net/
-// @version      1.34
-// @description  Покращена версія з виправленнями помилок
+// @version      1.35
+// @description  Покращена версія з виправленим інтерфейсом та оптимізацією
 // @author       Volodymyr_Romanovych
 // @match        https://farmy.live/*
 // @grant        none
@@ -16,36 +16,557 @@
 (function() {
     'use strict';
 
-    let attempts = 0;
-    const maxAttempts = 30;
-    let isWatchingAd = false;
-    let adWatchCount = 0;
-    let totalAdWatches = 0;
-    const MAX_TOTAL_ADS = 100;
-    let isRunning = true;
-    const MIN_DELAY = 13000;
-    const MAX_DELAY = 20000;
-    let lastAdTime = 0;
-    let currentDelay = 0;
-    let currentCycle = 0;
-    let errorCount = 0;
-    const MAX_ERRORS = 5;
+    // Константи та налаштування
+    const DEFAULT_SETTINGS = {
+        maxAds: 100,
+        minDelay: 13000,
+        maxDelay: 20000,
+        maxErrors: 5,
+        enableSound: false,
+        autoStart: false,
+        adaptiveDelays: true,
+        safetyChecks: true
+    };
+
+    // Стан скрипта
+    let state = {
+        attempts: 0,
+        maxAttempts: 30,
+        isWatchingAd: false,
+        adWatchCount: 0,
+        totalAdWatches: 0,
+        isRunning: false,
+        lastAdTime: 0,
+        currentDelay: 0,
+        currentCycle: 0,
+        errorCount: 0,
+        lastActionTime: Date.now(),
+        healthStatus: 'healthy'
+    };
+
+    // Налаштування
+    let settings = { ...DEFAULT_SETTINGS };
 
     // Змінні для перетягування
     let isDragging = false;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
+    let isPanelMinimized = false;
 
-    // Розширений словник для пошуку елементів
+    // Таймери
+    let healthCheckInterval;
+    let statusUpdateInterval;
+
+    // Словник для пошуку елементів
     const TEXT_PATTERNS = {
         quests: ['Задания', 'Завдання', 'Quests', 'Квести', 'Задачи'],
         claim: ['Забрать', 'Забрати', 'Claim', 'Получить', 'Отримати', 'Взяти', 'Собрать', 'Зібрати'],
         watchAd: ['Смотреть рекламу', 'Дивитись рекламу', 'Watch ad', 'Переглянути рекламу', 'Подивитись рекламу'],
         daily: ['Ежедневные', 'Щоденні', 'Daily', 'Основные', 'Основні', 'Щоденні завдання'],
-        close: ['Закрыть', 'Закрити', 'Close', '×', 'X']
+        close: ['Закрыть', 'Закрити', 'Close', '×', 'X'],
+        home: ['Главная', 'Головна', 'Home', 'Main']
     };
 
-    // Функції для перетягування
+    // Ініціалізація
+    function init() {
+        console.log('🚀 Farm Land Auto Quest & Ads Claim - Ultimate Edition v1.51 завантажується...');
+
+        loadSettings();
+        loadProgress();
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(initializeScript, 3000);
+            });
+        } else {
+            setTimeout(initializeScript, 3000);
+        }
+    }
+
+    function initializeScript() {
+        waitForGameLoad();
+        setTimeout(createEnhancedControlPanel, 2000);
+        startHealthMonitor();
+        startStatusUpdater();
+
+        if (settings.autoStart && state.totalAdWatches < settings.maxAds) {
+            setTimeout(() => {
+                showNotification('Автозапуск активовано!', 'success');
+                manualClaim();
+            }, 5000);
+        }
+    }
+
+    // === СИСТЕМА НАЛАШТУВАНЬ ===
+    function loadSettings() {
+        try {
+            const saved = localStorage.getItem('farmLandSettings');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                settings = { ...DEFAULT_SETTINGS, ...parsed };
+                console.log('⚙️ Налаштування завантажені:', settings);
+            }
+        } catch (error) {
+            console.error('Помилка завантаження налаштувань:', error);
+            settings = { ...DEFAULT_SETTINGS };
+        }
+    }
+
+    function saveSettings() {
+        try {
+            localStorage.setItem('farmLandSettings', JSON.stringify(settings));
+            showNotification('Налаштування збережено!', 'success');
+            console.log('💾 Налаштування збережено:', settings);
+        } catch (error) {
+            console.error('Помилка збереження налаштувань:', error);
+            showNotification('Помилка збереження налаштувань!', 'error');
+        }
+    }
+
+    // === СИСТЕМА ЗДОРОВ'Я ТА БЕЗПЕКИ ===
+    function startHealthMonitor() {
+        healthCheckInterval = setInterval(() => {
+            checkScriptHealth();
+        }, 15000);
+    }
+
+    function checkScriptHealth() {
+        const now = Date.now();
+
+        // Перевірка на зависання
+        if (state.isWatchingAd && now - state.lastAdTime > 60000) {
+            console.error('⚡ Реклама зависла! Скидаємо стан...');
+            state.isWatchingAd = false;
+            state.errorCount++;
+            state.healthStatus = 'warning';
+            showNotification('Виявлено завислу рекламу!', 'error');
+        }
+
+        // Перевірка загальної активності
+        if (state.isRunning && now - state.lastActionTime > 120000) {
+            console.warn('⚡ Скрипт неактивний більше 2 хвилин!');
+            state.healthStatus = 'warning';
+        }
+
+        // Попередження про помилки
+        if (state.errorCount > settings.maxErrors / 2) {
+            state.healthStatus = 'warning';
+        }
+
+        if (state.errorCount >= settings.maxErrors) {
+            state.healthStatus = 'error';
+            stopAutoClaim();
+            showNotification('Досягнуто максимальну кількість помилок! Скрипт зупинено.', 'error');
+        }
+
+        updateHealthIndicator();
+    }
+
+    function updateHealthIndicator() {
+        const indicator = document.getElementById('health-indicator');
+        if (!indicator) return;
+
+        let healthText, healthColor;
+
+        switch (state.healthStatus) {
+            case 'healthy':
+                healthText = '✅ Стан: Оптимальний';
+                healthColor = '#4CAF50';
+                break;
+            case 'warning':
+                healthText = `⚠️ Стан: Попередження (${state.errorCount} помилок)`;
+                healthColor = '#FF9800';
+                break;
+            case 'error':
+                healthText = '❌ Стан: Критичний';
+                healthColor = '#f44336';
+                break;
+            default:
+                healthText = '❓ Стан: Невідомий';
+                healthColor = '#9E9E9E';
+        }
+
+        indicator.textContent = healthText;
+        indicator.style.color = healthColor;
+    }
+
+    function checkSafety() {
+        // Перевірка на помилки
+        const errorElements = document.querySelectorAll('.error, .warning, .alert, .ban-message, [class*="error"], [class*="warning"]');
+        for (let element of errorElements) {
+            const text = element.textContent || '';
+            if (text.includes('бан') || text.includes('ban') ||
+                text.includes('підозріла') || text.includes('suspicious') ||
+                text.includes('блок') || text.includes('block')) {
+                console.error('⚡ ВИЯВЛЕНО ПРОБЛЕМУ: ', text);
+                state.healthStatus = 'error';
+                stopAutoClaim();
+                showNotification('Виявлено проблему! Скрипт зупинено.', 'error');
+                return false;
+            }
+        }
+
+        if (state.errorCount >= settings.maxErrors) {
+            stopAutoClaim();
+            return false;
+        }
+
+        return true;
+    }
+
+    // === ПОКРАЩЕНИЙ ІНТЕРФЕЙС ===
+    function createEnhancedControlPanel() {
+        if (document.getElementById('auto-control-panel')) return;
+
+        const container = document.createElement('div');
+        container.id = 'auto-control-panel';
+        container.innerHTML = `
+            <div class="panel-header" id="panel-header">
+                <span>🚜 Farm Land Auto v1.51</span>
+                <div class="header-buttons">
+                    <button class="minimize-btn" id="minimize-btn">−</button>
+                </div>
+            </div>
+            <div class="panel-content" id="panel-content">
+                <div class="progress-section">
+                    <div class="stats" id="auto-stats">Реклам: 0/100 (0%)</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="auto-progress-bar"></div>
+                    </div>
+                </div>
+
+                <div class="status-section">
+                    <div class="health-status" id="health-indicator">✅ Стан: Оптимальний</div>
+                    <div class="current-status" id="current-status">⏹️ Зупинено</div>
+                    <div class="timer" id="next-action-timer">Наступна дія: --</div>
+                </div>
+
+                <div class="controls">
+                    <button class="btn start" id="start-btn">▶️ Старт</button>
+                    <button class="btn stop" id="stop-btn">⏹️ Стоп</button>
+                    <button class="btn reset" id="reset-btn">🔄 Скинути</button>
+                </div>
+
+                <div class="quick-settings">
+                    <div class="setting-item">
+                        <label>Макс. реклам:</label>
+                        <input type="number" id="max-ads-input" value="100" min="1" max="500" class="setting-input">
+                    </div>
+                    <div class="setting-item">
+                        <label>Затримка (сек):</label>
+                        <input type="number" id="min-delay-input" value="13" min="5" max="60" class="setting-input">
+                    </div>
+                </div>
+
+                <div class="info-footer">
+                    <div>🛡️ Захищений режим</div>
+                    <div>👆 Перетягни для переміщення</div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(container);
+        addEnhancedStyles();
+        setupPanelEventListeners();
+        updateSettingsForm();
+        loadPanelPosition();
+        updateStatsDisplay();
+
+        console.log('🎮 Покращена панель керування створена!');
+    }
+
+    function addEnhancedStyles() {
+        const styles = `
+            #auto-control-panel {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 10000;
+                background: rgba(25, 25, 35, 0.95);
+                backdrop-filter: blur(20px);
+                border: 2px solid #4CAF50;
+                border-radius: 15px;
+                padding: 0;
+                min-width: 280px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+                user-select: none;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                transition: all 0.3s ease;
+                max-height: 80vh;
+                overflow: hidden;
+                color: white;
+            }
+
+            #auto-control-panel.minimized {
+                height: 45px;
+                min-width: 200px;
+            }
+
+            #auto-control-panel.minimized .panel-content {
+                display: none;
+            }
+
+            .panel-header {
+                background: linear-gradient(135deg, #2E7D32, #4CAF50);
+                padding: 12px 16px;
+                border-radius: 13px 13px 0 0;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                cursor: grab;
+                user-select: none;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .panel-header span {
+                color: white;
+                font-weight: 600;
+                font-size: 14px;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+            }
+
+            .minimize-btn {
+                background: rgba(255,255,255,0.2);
+                border: none;
+                color: white;
+                width: 24px;
+                height: 24px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 16px;
+                line-height: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s ease;
+                font-weight: bold;
+            }
+
+            .minimize-btn:hover {
+                background: rgba(255,255,255,0.3);
+                transform: scale(1.1);
+            }
+
+            .panel-content {
+                padding: 16px;
+                transition: all 0.3s ease;
+            }
+
+            .progress-section {
+                margin-bottom: 16px;
+            }
+
+            .stats {
+                color: #4CAF50;
+                font-size: 15px;
+                font-weight: 600;
+                text-align: center;
+                margin-bottom: 8px;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+            }
+
+            .progress-bar {
+                width: 100%;
+                height: 12px;
+                background: rgba(255,255,255,0.1);
+                border-radius: 6px;
+                overflow: hidden;
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+
+            .progress-fill {
+                height: 100%;
+                background: linear-gradient(135deg, #4CAF50, #8BC34A);
+                border-radius: 6px;
+                transition: width 0.5s ease, background 0.3s ease;
+                box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
+            }
+
+            .status-section {
+                background: rgba(255,255,255,0.05);
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 16px;
+                border: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .health-status, .current-status, .timer {
+                font-size: 12px;
+                margin: 4px 0;
+                font-weight: 500;
+            }
+
+            .current-status {
+                color: #FF9800;
+            }
+
+            .timer {
+                color: #2196F3;
+            }
+
+            .controls {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 8px;
+                margin-bottom: 16px;
+            }
+
+            .btn {
+                padding: 10px 8px;
+                border: none;
+                border-radius: 8px;
+                color: white;
+                font-weight: 600;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+            }
+
+            .btn.start {
+                background: linear-gradient(135deg, #4CAF50, #45a049);
+            }
+
+            .btn.stop {
+                background: linear-gradient(135deg, #f44336, #da190b);
+            }
+
+            .btn.reset {
+                background: linear-gradient(135deg, #FF9800, #e68900);
+            }
+
+            .btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            }
+
+            .btn:active {
+                transform: translateY(0);
+            }
+
+            .quick-settings {
+                background: rgba(255,255,255,0.05);
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 12px;
+                border: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .setting-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+
+            .setting-item:last-child {
+                margin-bottom: 0;
+            }
+
+            .setting-item label {
+                font-size: 12px;
+                color: #ccc;
+            }
+
+            .setting-input {
+                width: 60px;
+                padding: 6px 8px;
+                border: 1px solid #4CAF50;
+                border-radius: 6px;
+                background: rgba(255,255,255,0.1);
+                color: white;
+                font-size: 12px;
+                text-align: center;
+            }
+
+            .setting-input:focus {
+                outline: none;
+                border-color: #8BC34A;
+                box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+            }
+
+            .info-footer {
+                color: #888;
+                font-size: 10px;
+                text-align: center;
+                line-height: 1.4;
+            }
+
+            @keyframes slideDown {
+                from { opacity: 0; transform: translateY(-10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+        `;
+
+        const styleSheet = document.createElement('style');
+        styleSheet.textContent = styles;
+        document.head.appendChild(styleSheet);
+    }
+
+    function setupPanelEventListeners() {
+        const panel = document.getElementById('auto-control-panel');
+        const header = document.getElementById('panel-header');
+        const minimizeBtn = document.getElementById('minimize-btn');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const maxAdsInput = document.getElementById('max-ads-input');
+        const minDelayInput = document.getElementById('min-delay-input');
+
+        // Перетягування
+        header.addEventListener('mousedown', startDrag);
+        header.addEventListener('touchstart', startDrag);
+
+        // Кнопки управління
+        minimizeBtn.addEventListener('click', toggleMinimize);
+        startBtn.addEventListener('click', manualClaim);
+        stopBtn.addEventListener('click', stopAutoClaim);
+        resetBtn.addEventListener('click', resetCounters);
+
+        // Налаштування в реальному часі
+        maxAdsInput.addEventListener('change', updateMaxAds);
+        minDelayInput.addEventListener('change', updateMinDelay);
+    }
+
+    function updateMaxAds() {
+        const input = document.getElementById('max-ads-input');
+        settings.maxAds = parseInt(input.value) || 100;
+        saveSettings();
+        updateStatsDisplay();
+    }
+
+    function updateMinDelay() {
+        const input = document.getElementById('min-delay-input');
+        settings.minDelay = (parseInt(input.value) || 13) * 1000;
+        saveSettings();
+    }
+
+    function toggleMinimize() {
+        const panel = document.getElementById('auto-control-panel');
+        const minimizeBtn = document.getElementById('minimize-btn');
+
+        isPanelMinimized = !isPanelMinimized;
+
+        if (isPanelMinimized) {
+            panel.classList.add('minimized');
+            minimizeBtn.textContent = '+';
+        } else {
+            panel.classList.remove('minimized');
+            minimizeBtn.textContent = '−';
+        }
+
+        savePanelPosition();
+    }
+
+    function updateSettingsForm() {
+        const maxAdsInput = document.getElementById('max-ads-input');
+        const minDelayInput = document.getElementById('min-delay-input');
+
+        if (maxAdsInput) maxAdsInput.value = settings.maxAds;
+        if (minDelayInput) minDelayInput.value = Math.round(settings.minDelay / 1000);
+    }
+
+    // === ФУНКЦІОНАЛ ПЕРЕТЯГУВАННЯ ===
     function startDrag(e) {
         const container = document.getElementById('auto-control-panel');
         if (!container) return;
@@ -88,16 +609,14 @@
             clientY = touch.clientY;
         }
 
-        // Обмеження руху в межах вікна
         const maxX = window.innerWidth - container.offsetWidth;
         const maxY = window.innerHeight - container.offsetHeight;
 
         let newX = clientX - dragOffsetX;
         let newY = clientY - dragOffsetY;
 
-        // Застосування обмежень
-        newX = Math.max(0, Math.min(newX, maxX));
-        newY = Math.max(0, Math.min(newY, maxY));
+        newX = Math.max(10, Math.min(newX, maxX - 10));
+        newY = Math.max(10, Math.min(newY, maxY - 10));
 
         container.style.left = newX + 'px';
         container.style.top = newY + 'px';
@@ -112,7 +631,6 @@
         if (container) {
             container.style.transition = 'all 0.3s ease';
             container.style.cursor = 'grab';
-            // Зберігаємо позицію
             savePanelPosition();
         }
 
@@ -127,8 +645,9 @@
         if (!container) return;
 
         const position = {
-            x: parseInt(container.style.left),
-            y: parseInt(container.style.top)
+            x: parseInt(container.style.left) || 0,
+            y: parseInt(container.style.top) || 0,
+            minimized: isPanelMinimized
         };
 
         localStorage.setItem('farmLandPanelPosition', JSON.stringify(position));
@@ -144,6 +663,10 @@
                     container.style.left = position.x + 'px';
                     container.style.top = position.y + 'px';
                     container.style.right = 'auto';
+
+                    if (position.minimized) {
+                        toggleMinimize();
+                    }
                 }
             }
         } catch (error) {
@@ -151,204 +674,150 @@
         }
     }
 
-    // Функція для безпечного пошуку тексту
-    function matchesPattern(text, patterns) {
-        const cleanText = (text || '').toString().trim().toLowerCase();
-        return patterns.some(pattern =>
-            cleanText.includes(pattern.toLowerCase())
-        );
+    // === ОНОВЛЕННЯ СТАТУСУ ===
+    function startStatusUpdater() {
+        statusUpdateInterval = setInterval(updateStatusDisplay, 1000);
     }
 
-    // Функція для отримання випадкової затримки
-    function getRandomDelay() {
-        return Math.floor(Math.random() * (MAX_DELAY - MIN_DELAY + 1)) + MIN_DELAY;
+    function updateStatusDisplay() {
+        updateStatsDisplay();
+        updateNextActionTimer();
     }
 
-    // Функція для безпечного кліку
-    function safeClick(element) {
-        try {
-            if (element && element instanceof HTMLElement &&
-                !element.disabled &&
-                element.style.display !== 'none' &&
-                element.offsetParent !== null) {
+    function updateNextActionTimer() {
+        const timerElement = document.getElementById('next-action-timer');
+        if (!timerElement) return;
 
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                element.click();
-                return true;
+        if (!state.isRunning || state.totalAdWatches >= settings.maxAds) {
+            timerElement.textContent = 'Наступна дія: --';
+            return;
+        }
+
+        if (state.isWatchingAd) {
+            const adTime = Date.now() - state.lastAdTime;
+            const remaining = Math.max(0, 41000 - adTime);
+            timerElement.textContent = `Реклама: ${Math.ceil(remaining/1000)}с`;
+            return;
+        }
+
+        if (state.lastAdTime > 0) {
+            const timeSinceLastAd = Date.now() - state.lastAdTime;
+            const remaining = Math.max(0, state.currentDelay - timeSinceLastAd);
+
+            if (remaining > 0) {
+                timerElement.textContent = `Затримка: ${Math.ceil(remaining/1000)}с`;
+            } else {
+                timerElement.textContent = 'Пошук реклами...';
             }
-        } catch (error) {
-            console.error('Помилка при кліку:', error);
+        } else {
+            timerElement.textContent = 'Готовий до старту';
         }
-        return false;
     }
 
-    // Функція для очікування
-    function wait(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    function updateCurrentStatus(status) {
+        const statusElement = document.getElementById('current-status');
+        if (statusElement) {
+            statusElement.textContent = status;
+        }
     }
 
-    // Перевірка безпеки
-    function checkSafety() {
-        // Перевірка на помилки
-        const errorElements = document.querySelectorAll('.error, .warning, .alert, .ban-message, [class*="error"], [class*="warning"]');
-        for (let element of errorElements) {
-            const text = element.textContent || '';
-            if (text.includes('бан') || text.includes('ban') ||
-                text.includes('підозріла') || text.includes('suspicious') ||
-                text.includes('блок') || text.includes('block')) {
-                console.error('⚡ ВИЯВЛЕНО ПРОБЛЕМУ: ', text);
-                stopAutoClaim();
-                showNotification('Виявлено проблему! Скрипт зупинено.', 'error');
-                return false;
-            }
+    // === ОСНОВНА ЛОГІКА ===
+    function getAdaptiveDelay() {
+        const baseDelay = Math.floor(Math.random() * (settings.maxDelay - settings.minDelay + 1)) + settings.minDelay;
+
+        if (!settings.adaptiveDelays) {
+            return baseDelay;
         }
 
-        // Перевірка кількості помилок
-        if (errorCount >= MAX_ERRORS) {
-            console.error('Досягнуто максимальну кількість помилок');
-            stopAutoClaim();
-            showNotification('Забагато помилок! Скрипт зупинено.', 'error');
-            return false;
+        if (state.errorCount > 0) {
+            return baseDelay + (state.errorCount * 2000);
         }
 
-        return true;
+        if (state.adWatchCount > 3 && state.errorCount === 0) {
+            return Math.max(settings.minDelay, baseDelay - 1000);
+        }
+
+        return baseDelay;
     }
 
     function canWatchAd() {
-        if (!isRunning || isWatchingAd) return false;
-        if (totalAdWatches >= MAX_TOTAL_ADS) return false;
-        if (lastAdTime === 0) return true;
+        if (!state.isRunning || state.isWatchingAd) return false;
+        if (state.totalAdWatches >= settings.maxAds) return false;
+        if (state.lastAdTime === 0) return true;
 
-        const timeSinceLastAd = Date.now() - lastAdTime;
-        return timeSinceLastAd >= currentDelay;
+        const timeSinceLastAd = Date.now() - state.lastAdTime;
+        return timeSinceLastAd >= state.currentDelay;
     }
 
     function checkMaxAdsReached() {
-        if (totalAdWatches >= MAX_TOTAL_ADS) {
-            console.log(`⚡⚡⚡ ДОСЯГНУТО МАКСИМАЛЬНУ КІЛЬКІСТЬ РЕКЛАМ: ${MAX_TOTAL_ADS} ⚡⚡⚡`);
-            isRunning = false;
+        if (state.totalAdWatches >= settings.maxAds) {
+            console.log(`🎉 ДОСЯГНУТО ЛІМІТ РЕКЛАМ: ${settings.maxAds}`);
+            state.isRunning = false;
             showMaxAdsNotification();
             saveProgress();
+            updateCurrentStatus('🎉 Завершено!');
             return true;
         }
         return false;
     }
 
-    function showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        const bgColor = type === 'error' ? 'linear-gradient(45deg, #ff0000, #ff6b6b)' :
-                         type === 'success' ? 'linear-gradient(45deg, #00c853, #64dd17)' :
-                         'linear-gradient(45deg, #2196F3, #21CBF3)';
-
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${bgColor};
-            color: white;
-            padding: 15px 25px;
-            border-radius: 10px;
-            z-index: 10001;
-            font-size: 14px;
-            font-weight: bold;
-            text-align: center;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            border: 2px solid white;
-            animation: slideDown 0.3s ease;
-            max-width: 80%;
-            word-wrap: break-word;
-        `;
-
-        // Додаємо CSS анімацію
-        if (!document.querySelector('#notification-styles')) {
-            const style = document.createElement('style');
-            style.id = 'notification-styles';
-            style.textContent = `
-                @keyframes slideDown {
-                    from { top: -100px; opacity: 0; }
-                    to { top: 20px; opacity: 1; }
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
-        notification.innerHTML = message;
-        document.body.appendChild(notification);
-
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.style.animation = 'slideUp 0.3s ease';
-                setTimeout(() => notification.parentNode.removeChild(notification), 300);
-            }
-        }, 4000);
-    }
-
-    function showMaxAdsNotification() {
-        showNotification(`
-            <div>🎉 ДОСЯГНУТО ЛІМІТ РЕКЛАМ! 🎉</div>
-            <div style="font-size: 16px; margin: 8px 0;">${MAX_TOTAL_ADS} реклам переглянуто</div>
-            <div>Скрипт автоматично зупинено</div>
-        `, 'success');
-    }
-
     async function openAndClaimQuests() {
-        if (!isRunning || !checkSafety()) return;
+        if (!state.isRunning || !checkSafety()) return;
         if (checkMaxAdsReached()) return;
 
-        currentCycle++;
-        console.log(`=== Цикл ${currentCycle} ===`);
+        state.currentCycle++;
+        state.lastActionTime = Date.now();
+        console.log(`=== Цикл ${state.currentCycle} ===`);
 
-        if (isWatchingAd) {
+        if (state.isWatchingAd) {
             console.log('Зараз переглядаємо рекламу, чекаємо...');
+            updateCurrentStatus('⏳ Очікування реклами...');
             await wait(3000);
             return openAndClaimQuests();
         }
 
-        // Генеруємо нову затримку
-        currentDelay = getRandomDelay();
+        state.currentDelay = getAdaptiveDelay();
 
-        // Перевіряємо затримку
-        if (lastAdTime > 0 && Date.now() - lastAdTime < currentDelay) {
-            const remaining = currentDelay - (Date.now() - lastAdTime);
+        if (state.lastAdTime > 0 && Date.now() - state.lastAdTime < state.currentDelay) {
+            const remaining = state.currentDelay - (Date.now() - state.lastAdTime);
             console.log(`Чекаємо затримку ${Math.round(remaining/1000)}с...`);
+            updateCurrentStatus(`⏰ Затримка: ${Math.round(remaining/1000)}с`);
             await wait(remaining + 1000);
         }
 
-        attempts++;
-        console.log(`Спроба ${attempts} знайти кнопку завдань... (${totalAdWatches}/${MAX_TOTAL_ADS} реклам)`);
+        state.attempts++;
+        console.log(`Спроба ${state.attempts} знайти кнопку завдань... (${state.totalAdWatches}/${settings.maxAds} реклам)`);
+        updateCurrentStatus('🔍 Пошук завдань...');
 
-        // Покращений пошук кнопки завдань
         let questButton = findQuestButton();
 
         if (questButton) {
-            console.log('Знайдено кнопку завдань, клікаємо...');
+            console.log('Знайдено кнопку завдань');
+            updateCurrentStatus('📋 Відкриття завдань...');
             if (safeClick(questButton)) {
                 await wait(2500);
                 await processQuestsModal();
             } else {
                 console.log('Не вдалося клікнути кнопку завдань');
-                errorCount++;
+                state.errorCount++;
                 await retryOrContinue();
             }
         } else {
             console.log('Кнопка завдань не знайдена');
-            if (attempts < maxAttempts) {
+            if (state.attempts < state.maxAttempts) {
                 await wait(2000);
                 await openAndClaimQuests();
             } else {
-                console.log('Досягнуто максимальну кількість спроб пошуку завдань');
+                console.log('Переходимо до перевірки головного екрану');
                 await checkForAdsOnMainScreen();
             }
         }
     }
 
     function findQuestButton() {
-        // Спосіб 1: За data-атрибутами
         let button = document.querySelector('[data-page="quests"], [data-tab="quests"], .nav-item[data-page="quests"]');
         if (button) return button;
 
-        // Спосіб 2: За текстом
         const allButtons = document.querySelectorAll('.nav-item, .bottom-nav button, .menu-item, button');
         for (let btn of allButtons) {
             if (matchesPattern(btn.textContent, TEXT_PATTERNS.quests)) {
@@ -356,15 +825,20 @@
             }
         }
 
-        // Спосіб 3: За класами
         button = document.querySelector('.quests-btn, .quests-button, .quests-icon');
         return button || null;
     }
 
-    async function processQuestsModal() {
-        if (!isRunning) return;
+    function matchesPattern(text, patterns) {
+        const cleanText = (text || '').toString().trim().toLowerCase();
+        return patterns.some(pattern =>
+            cleanText.includes(pattern.toLowerCase())
+        );
+    }
 
-        // Перевіряємо модальне вікно
+    async function processQuestsModal() {
+        if (!state.isRunning) return;
+
         const questsModal = document.querySelector('#quests-modal, .quests-modal, [class*="quests-modal"], .modal[style*="display: block"]');
         if (questsModal && getComputedStyle(questsModal).display !== 'none') {
             console.log('Модальне вікно завдань відкрито');
@@ -378,8 +852,8 @@
 
     async function switchQuestTabs() {
         console.log('Шукаємо вкладки завдань...');
+        updateCurrentStatus('📑 Перемикання вкладок...');
 
-        // Пошук вкладок
         const tabsContainer = document.querySelector('#quests-tabs-container, .quests-tabs, .tabs-container');
         const tabs = tabsContainer ?
             tabsContainer.querySelectorAll('.tab, .quest-tab, button, div[data-tab]') :
@@ -388,7 +862,7 @@
         let foundTab = false;
 
         for (let tab of tabs) {
-            if (!isRunning) break;
+            if (!state.isRunning) break;
 
             if (matchesPattern(tab.textContent, TEXT_PATTERNS.daily) ||
                 tab.textContent.match(/[0-9]+\s*\/\s*[0-9]+/)) {
@@ -404,28 +878,28 @@
         }
 
         if (!foundTab) {
-            console.log('Спеціальних вкладок не знайдено, шукаємо кнопки безпосередньо');
+            console.log('Шукаємо кнопки безпосередньо');
             await wait(1500);
             await clickClaimButtons();
         }
     }
 
     async function clickClaimButtons() {
-        if (!isRunning || !checkSafety()) return;
+        if (!state.isRunning || !checkSafety()) return;
         if (checkMaxAdsReached()) return;
 
         console.log('Шукаємо кнопки для кліку...');
+        updateCurrentStatus('🔍 Пошук кнопок...');
 
-        const allButtons = document.querySelectorAll('#quests-list button, .quests-list button, .quest-item button, .quest-button, button');
+        const allButtons = document.querySelectorAll('button');
         let foundAdButtons = false;
 
         for (let button of allButtons) {
-            if (!isRunning) break;
+            if (!state.isRunning) break;
             if (checkMaxAdsReached()) return;
 
-            const text = (button.textContent || button.innerText).trim();
+            const text = (button.textContent || '').trim();
 
-            // Спочатку шукаємо кнопки реклами
             if (matchesPattern(text, TEXT_PATTERNS.watchAd) &&
                 !button.disabled &&
                 getComputedStyle(button).display !== 'none') {
@@ -433,60 +907,60 @@
                 console.log('Знайдено кнопку перегляду реклами:', text);
 
                 if (!canWatchAd()) {
-                    if (totalAdWatches >= MAX_TOTAL_ADS) {
+                    if (state.totalAdWatches >= settings.maxAds) {
                         checkMaxAdsReached();
                         return;
                     }
-                    const remaining = Math.max(0, currentDelay - (Date.now() - lastAdTime));
+                    const remaining = Math.max(0, state.currentDelay - (Date.now() - state.lastAdTime));
                     console.log(`Затримка не пройшла, чекаємо ${Math.round(remaining/1000)}с`);
+                    updateCurrentStatus(`⏰ Затримка: ${Math.round(remaining/1000)}с`);
                     await wait(remaining + 1000);
-                    // Продовжуємо пошук після затримки
                     return clickClaimButtons();
                 }
 
                 foundAdButtons = true;
                 console.log('Клікаємо на перегляд реклами...');
+                updateCurrentStatus('📺 Перегляд реклами...');
 
                 if (safeClick(button)) {
-                    isWatchingAd = true;
-                    adWatchCount++;
-                    totalAdWatches++;
-                    lastAdTime = Date.now();
+                    state.isWatchingAd = true;
+                    state.adWatchCount++;
+                    state.totalAdWatches++;
+                    state.lastAdTime = Date.now();
+                    state.lastActionTime = Date.now();
 
                     updateStatsDisplay();
                     saveProgress();
 
-                    const nextDelay = getRandomDelay();
-                    console.log(`Переглядаємо рекламу (${totalAdWatches}/${MAX_TOTAL_ADS}), наступна затримка: ${Math.round(nextDelay/1000)}с`);
+                    const nextDelay = getAdaptiveDelay();
+                    console.log(`Переглядаємо рекламу (${state.totalAdWatches}/${settings.maxAds})`);
 
-                    // Очікування завершення реклами
-                    await wait(41000); // 41 секунди
+                    await wait(41000);
 
-                    isWatchingAd = false;
-                    currentDelay = nextDelay;
+                    state.isWatchingAd = false;
+                    state.currentDelay = nextDelay;
 
                     if (checkMaxAdsReached()) return;
 
                     console.log(`Реклама завершена, чекаємо ${Math.round(nextDelay/1000)}с`);
+                    updateCurrentStatus(`⏰ Затримка: ${Math.round(nextDelay/1000)}с`);
                     await wait(nextDelay);
 
-                    // Продовжуємо пошук після реклами
                     return clickClaimButtons();
                 } else {
-                    errorCount++;
+                    state.errorCount++;
                     console.log('Не вдалося клікнути кнопку реклами');
                 }
                 break;
             }
         }
 
-        // Якщо рекламу не знайшли, шукаємо кнопки забирання
         if (!foundAdButtons) {
             let foundClaims = false;
             for (let button of allButtons) {
-                if (!isRunning) break;
+                if (!state.isRunning) break;
 
-                const text = (button.textContent || button.innerText).trim();
+                const text = (button.textContent || '').trim();
                 if (matchesPattern(text, TEXT_PATTERNS.claim) &&
                     !button.disabled &&
                     getComputedStyle(button).display !== 'none') {
@@ -511,17 +985,18 @@
     }
 
     async function checkForAdsOnMainScreen() {
-        if (!isRunning || !checkSafety()) return;
+        if (!state.isRunning || !checkSafety()) return;
         if (checkMaxAdsReached()) return;
 
-        console.log('Перевіряємо головний екран на наявність реклами...');
+        console.log('Перевіряємо головний екран...');
+        updateCurrentStatus('🔍 Пошук реклами...');
 
-        currentDelay = getRandomDelay();
+        state.currentDelay = getAdaptiveDelay();
 
-        // Перевіряємо затримку
-        if (lastAdTime > 0 && Date.now() - lastAdTime < currentDelay) {
-            const remaining = currentDelay - (Date.now() - lastAdTime);
+        if (state.lastAdTime > 0 && Date.now() - state.lastAdTime < state.currentDelay) {
+            const remaining = state.currentDelay - (Date.now() - state.lastAdTime);
             console.log(`Чекаємо затримку ${Math.round(remaining/1000)}с...`);
+            updateCurrentStatus(`⏰ Затримка: ${Math.round(remaining/1000)}с`);
             await wait(remaining + 1000);
         }
 
@@ -529,10 +1004,10 @@
         let foundAd = false;
 
         for (let button of allButtons) {
-            if (!isRunning) break;
+            if (!state.isRunning) break;
             if (checkMaxAdsReached()) return;
 
-            const text = (button.textContent || button.innerText).trim();
+            const text = (button.textContent || '').trim();
             if (matchesPattern(text, TEXT_PATTERNS.watchAd) &&
                 !button.disabled &&
                 getComputedStyle(button).display !== 'none') {
@@ -540,44 +1015,48 @@
                 console.log('Знайдено кнопку реклами на головному екрані:', text);
 
                 if (!canWatchAd()) {
-                    if (totalAdWatches >= MAX_TOTAL_ADS) {
+                    if (state.totalAdWatches >= settings.maxAds) {
                         checkMaxAdsReached();
                         return;
                     }
-                    const remaining = Math.max(0, currentDelay - (Date.now() - lastAdTime));
+                    const remaining = Math.max(0, state.currentDelay - (Date.now() - state.lastAdTime));
                     console.log(`Затримка не пройшла, чекаємо ${Math.round(remaining/1000)}с`);
+                    updateCurrentStatus(`⏰ Затримка: ${Math.round(remaining/1000)}с`);
                     await wait(remaining + 1000);
                     return checkForAdsOnMainScreen();
                 }
 
                 foundAd = true;
-                console.log('Клікаємо на рекламу на головному екрані...');
+                console.log('Клікаємо на рекламу...');
+                updateCurrentStatus('📺 Перегляд реклами...');
 
                 if (safeClick(button)) {
-                    isWatchingAd = true;
-                    adWatchCount++;
-                    totalAdWatches++;
-                    lastAdTime = Date.now();
+                    state.isWatchingAd = true;
+                    state.adWatchCount++;
+                    state.totalAdWatches++;
+                    state.lastAdTime = Date.now();
+                    state.lastActionTime = Date.now();
 
                     updateStatsDisplay();
                     saveProgress();
 
-                    const nextDelay = getRandomDelay();
-                    console.log(`Переглядаємо рекламу (${totalAdWatches}/${MAX_TOTAL_ADS})`);
+                    const nextDelay = getAdaptiveDelay();
+                    console.log(`Переглядаємо рекламу (${state.totalAdWatches}/${settings.maxAds})`);
 
-                    await wait(41000); // 41 секунди
+                    await wait(41000);
 
-                    isWatchingAd = false;
-                    currentDelay = nextDelay;
+                    state.isWatchingAd = false;
+                    state.currentDelay = nextDelay;
 
                     if (checkMaxAdsReached()) return;
 
                     console.log(`Реклама завершена, чекаємо ${Math.round(nextDelay/1000)}с`);
+                    updateCurrentStatus(`⏰ Затримка: ${Math.round(nextDelay/1000)}с`);
                     await wait(nextDelay);
 
                     return checkForAdsOnMainScreen();
                 } else {
-                    errorCount++;
+                    state.errorCount++;
                 }
                 break;
             }
@@ -585,27 +1064,53 @@
 
         if (!foundAd) {
             console.log('Реклами не знайдено');
-            console.log(`Підсумок циклу: ${adWatchCount} реклам в циклі, ${totalAdWatches}/${MAX_TOTAL_ADS} всього`);
+            console.log(`Підсумок циклу: ${state.adWatchCount} реклам, ${state.totalAdWatches}/${settings.maxAds} всього`);
+            updateCurrentStatus('💤 Очікування...');
 
-            adWatchCount = 0;
-            attempts = 0;
+            state.adWatchCount = 0;
+            state.attempts = 0;
 
             if (checkMaxAdsReached()) return;
 
-            const cycleDelay = getRandomDelay();
+            const cycleDelay = getAdaptiveDelay();
             console.log(`Чекаємо ${Math.round(cycleDelay/1000)}с перед новим циклом...`);
+            updateCurrentStatus(`⏰ Очікування: ${Math.round(cycleDelay/1000)}с`);
 
             await wait(cycleDelay);
 
-            if (isRunning && totalAdWatches < MAX_TOTAL_ADS) {
+            if (state.isRunning && state.totalAdWatches < settings.maxAds) {
                 console.log('Запускаємо новий цикл...');
                 await openAndClaimQuests();
             }
         }
     }
 
+    // === ДОПОМІЖНІ ФУНКЦІЇ ===
+    function safeClick(element) {
+        try {
+            if (element && element instanceof HTMLElement &&
+                !element.disabled &&
+                element.style.display !== 'none' &&
+                element.offsetParent !== null) {
+
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                element.click();
+                state.lastActionTime = Date.now();
+                return true;
+            }
+        } catch (error) {
+            console.error('Помилка при кліку:', error);
+            state.errorCount++;
+        }
+        return false;
+    }
+
+    function wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     async function finalCheckAndClose() {
-        if (!isRunning) return;
+        if (!state.isRunning) return;
         if (checkMaxAdsReached()) return;
 
         await wait(2000);
@@ -614,7 +1119,7 @@
         let anyActive = false;
 
         for (let btn of finalButtons) {
-            const txt = (btn.textContent || btn.innerText).trim();
+            const txt = (btn.textContent || '').trim();
             if ((matchesPattern(txt, TEXT_PATTERNS.claim) || matchesPattern(txt, TEXT_PATTERNS.watchAd)) &&
                 !btn.disabled && getComputedStyle(btn).display !== 'none') {
                 console.log('Знайдено активну кнопку при фінальній перевірці:', txt);
@@ -637,7 +1142,6 @@
     async function closeQuestsModal() {
         console.log('Закриваємо модальне вікно завдань...');
 
-        // Різні способи закриття
         const closeSelectors = [
             '.modal-close', '.close-btn', '[onclick*="close"]', '.btn-close',
             '[class*="close"]', '.modal .btn', 'button[data-dismiss="modal"]'
@@ -651,7 +1155,6 @@
             }
         }
 
-        // Спроба закриття кліком на затемнення
         const overlay = document.querySelector('.modal-backdrop, .modal-overlay');
         if (overlay) {
             safeClick(overlay);
@@ -660,8 +1163,8 @@
     }
 
     async function retryOrContinue() {
-        if (attempts < maxAttempts) {
-            attempts++;
+        if (state.attempts < state.maxAttempts) {
+            state.attempts++;
             await wait(2000);
             await openAndClaimQuests();
         } else {
@@ -671,30 +1174,90 @@
     }
 
     function waitForGameLoad() {
-        if (!isRunning) return;
+        if (!state.isRunning) return;
 
         const gameElements = document.querySelectorAll('.top-panel, .bottom-nav, .garden-bed, #quests-modal, .game-container');
         if (gameElements.length > 0) {
-            console.log('Гра завантажена, запускаємо автоматизацію...');
-            loadProgress();
+            console.log('Гра завантажена!');
+            updateCurrentStatus('✅ Гра завантажена');
 
             setTimeout(() => {
-                if (isRunning && totalAdWatches < MAX_TOTAL_ADS) {
-                    openAndClaimQuests();
+                if (state.isRunning && state.totalAdWatches < settings.maxAds && !settings.autoStart) {
+                    showNotification('Автоматизація готова до роботи!', 'success');
                 }
-            }, 5000);
+            }, 3000);
         } else {
             console.log('Очікування завантаження гри...');
             setTimeout(waitForGameLoad, 3000);
         }
     }
 
-    // Збереження/відновлення прогресу
+    // === СИСТЕМА СПОВІЩЕНЬ ===
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        const bgColor = type === 'error' ? 'linear-gradient(135deg, #ff0000, #ff6b6b)' :
+                         type === 'success' ? 'linear-gradient(135deg, #00c853, #64dd17)' :
+                         type === 'warning' ? 'linear-gradient(135deg, #FF9800, #FFC107)' :
+                         'linear-gradient(135deg, #2196F3, #21CBF3)';
+
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: ${bgColor};
+            color: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            z-index: 10001;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+            border: 2px solid white;
+            animation: slideDown 0.3s ease;
+            max-width: 80%;
+            word-wrap: break-word;
+            backdrop-filter: blur(10px);
+        `;
+
+        if (!document.querySelector('#notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'notification-styles';
+            style.textContent = `
+                @keyframes slideDown {
+                    from { top: -100px; opacity: 0; }
+                    to { top: 20px; opacity: 1; }
+                }
+                @keyframes slideUp {
+                    from { top: 20px; opacity: 1; }
+                    to { top: -100px; opacity: 0; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.style.animation = 'slideUp 0.3s ease';
+                setTimeout(() => notification.parentNode.removeChild(notification), 300);
+            }
+        }, 4000);
+    }
+
+    function showMaxAdsNotification() {
+        showNotification(`🎉 Досягнуто ліміт ${settings.maxAds} реклам! Скрипт зупинено.`, 'success');
+    }
+
+    // === ЗБЕРЕЖЕННЯ ТА ВІДНОВЛЕННЯ ===
     function saveProgress() {
         const progress = {
-            totalAdWatches: totalAdWatches,
+            totalAdWatches: state.totalAdWatches,
             lastRun: Date.now(),
-            version: '1.1'
+            version: '1.51'
         };
         localStorage.setItem('farmLandAutoProgress', JSON.stringify(progress));
     }
@@ -704,238 +1267,88 @@
             const saved = localStorage.getItem('farmLandAutoProgress');
             if (saved) {
                 const data = JSON.parse(saved);
-                totalAdWatches = data.totalAdWatches || 0;
-                console.log(`Відновлено прогрес: ${totalAdWatches}/${MAX_TOTAL_ADS} реклам`);
+                state.totalAdWatches = data.totalAdWatches || 0;
+                console.log(`📊 Відновлено прогрес: ${state.totalAdWatches}/${settings.maxAds} реклам`);
+                updateStatsDisplay();
             }
         } catch (error) {
             console.error('Помилка відновлення прогресу:', error);
         }
     }
 
-    // Функції для ручного керування
+    function updateStatsDisplay() {
+        const stats = document.getElementById('auto-stats');
+        if (stats) {
+            const progress = Math.min((state.totalAdWatches / settings.maxAds) * 100, 100);
+            stats.textContent = `Реклам: ${state.totalAdWatches}/${settings.maxAds} (${Math.round(progress)}%)`;
+
+            const progressBar = document.getElementById('auto-progress-bar');
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+                progressBar.style.background = progress >= 100 ? 'linear-gradient(135deg, #ff4444, #ff6b6b)' :
+                                              progress >= 80 ? 'linear-gradient(135deg, #ff9800, #FFC107)' :
+                                              'linear-gradient(135deg, #4CAF50, #8BC34A)';
+            }
+        }
+    }
+
+    // === ФУНКЦІЇ КЕРУВАННЯ ===
     function manualClaim() {
         if (checkMaxAdsReached()) {
             showNotification('Ліміт реклам вже досягнуто!', 'error');
             return;
         }
 
-        isRunning = true;
-        attempts = 0;
-        adWatchCount = 0;
-        errorCount = 0;
-        lastAdTime = 0;
-        currentDelay = getRandomDelay();
+        state.isRunning = true;
+        state.attempts = 0;
+        state.adWatchCount = 0;
+        state.errorCount = 0;
+        state.lastAdTime = 0;
+        state.currentDelay = getAdaptiveDelay();
+        state.healthStatus = 'healthy';
 
-        console.log(`Запуск автоматизації з затримкою ${Math.round(currentDelay/1000)}с...`);
+        console.log(`🚀 Запуск автоматизації...`);
         showNotification('Автоматизацію запущено!', 'success');
+        updateCurrentStatus('▶️ Запущено');
         openAndClaimQuests();
     }
 
     function stopAutoClaim() {
-        isRunning = false;
-        isWatchingAd = false;
-        console.log('Автоматизацію зупинено');
+        state.isRunning = false;
+        state.isWatchingAd = false;
+        console.log('⏹️ Автоматизацію зупинено');
         showNotification('Автоматизацію зупинено', 'info');
+        updateCurrentStatus('⏹️ Зупинено');
         saveProgress();
     }
 
     function resetCounters() {
-        adWatchCount = 0;
-        totalAdWatches = 0;
-        attempts = 0;
-        errorCount = 0;
-        lastAdTime = 0;
-        currentDelay = getRandomDelay();
-        isRunning = true;
+        if (confirm('Скинути всі лічильники?')) {
+            state.adWatchCount = 0;
+            state.totalAdWatches = 0;
+            state.attempts = 0;
+            state.errorCount = 0;
+            state.lastAdTime = 0;
+            state.currentDelay = getAdaptiveDelay();
+            state.isRunning = false;
+            state.healthStatus = 'healthy';
 
-        console.log('Лічильники скинуті');
-        showNotification('Лічильники скинуті!', 'success');
-        updateStatsDisplay();
-        saveProgress();
-    }
-
-    function updateStatsDisplay() {
-        const stats = document.getElementById('auto-stats');
-        if (stats) {
-            const progress = Math.min((totalAdWatches / MAX_TOTAL_ADS) * 100, 100);
-            stats.innerHTML = `Реклам: ${totalAdWatches}/${MAX_TOTAL_ADS} (${Math.round(progress)}%)`;
-
-            const progressBar = document.getElementById('auto-progress-bar');
-            if (progressBar) {
-                progressBar.style.width = `${progress}%`;
-                progressBar.style.background = progress >= 100 ? '#ff4444' :
-                                              progress >= 80 ? '#ff9800' : '#4CAF50';
-            }
+            console.log('🔄 Лічильники скинуті');
+            showNotification('Лічильники скинуті!', 'success');
+            updateCurrentStatus('⏹️ Зупинено');
+            updateStatsDisplay();
+            saveProgress();
         }
     }
 
-    function addManualButtons() {
-        if (document.getElementById('auto-control-panel')) return;
-
-        const container = document.createElement('div');
-        container.id = 'auto-control-panel';
-        container.style.cssText = `
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 9999;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-            background: rgba(0, 0, 0, 0.50);
-            padding: 12px;
-            border-radius: 12px;
-            border: 2px solid #4CAF50;
-            min-width: 220px;
-            backdrop-filter: blur(10px);
-            font-family: Arial, sans-serif;
-            cursor: grab;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            user-select: none;
-        `;
-
-        // Додаємо обробники перетягування
-        container.addEventListener('mousedown', startDrag);
-        container.addEventListener('touchstart', startDrag);
-
-        const title = document.createElement('div');
-        title.innerHTML = '🎲 Farm Land Auto v1.34';
-        title.style.cssText = `
-            color: white;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 8px;
-            font-size: 14px;
-            border-bottom: 1px solid #4CAF50;
-            padding-bottom: 5px;
-            cursor: grab;
-        `;
-
-        // Прогрес бар
-        const progressContainer = document.createElement('div');
-        progressContainer.style.cssText = `
-            width: 100%;
-            height: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            margin-bottom: 8px;
-            overflow: hidden;
-        `;
-
-        const progressBar = document.createElement('div');
-        progressBar.id = 'auto-progress-bar';
-        progressBar.style.cssText = `
-            width: 0%;
-            height: 100%;
-            background: #4CAF50;
-            border-radius: 5px;
-            transition: width 0.3s ease, background 0.3s ease;
-        `;
-
-        progressContainer.appendChild(progressBar);
-
-        const stats = document.createElement('div');
-        stats.id = 'auto-stats';
-        stats.style.cssText = `
-            color: white;
-            font-size: 12px;
-            text-align: center;
-            margin-bottom: 8px;
-            font-weight: bold;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-        `;
-        stats.innerHTML = `Реклам: 0/${MAX_TOTAL_ADS} (0%)`;
-
-        const buttonsContainer = document.createElement('div');
-        buttonsContainer.style.cssText = `
-            display: flex;
-            gap: 5px;
-            justify-content: space-between;
-            margin-bottom: 5px;
-        `;
-
-        const startBtn = createButton('🔄 Старт', '#4CAF50', manualClaim);
-        const stopBtn = createButton('⏹️ Стоп', '#f44336', stopAutoClaim);
-        const resetBtn = createButton('🔄 Скинути', '#FF9800', resetCounters);
-
-        buttonsContainer.appendChild(startBtn);
-        buttonsContainer.appendChild(stopBtn);
-        buttonsContainer.appendChild(resetBtn);
-
-        const infoText = document.createElement('div');
-        infoText.style.cssText = `
-            color: #4CAF50;
-            font-size: 10px;
-            text-align: center;
-            margin-top: 3px;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-        `;
-        infoText.innerHTML = '🎲 Затримка 13-20с | 🛡️ Захищений | 👆 Перетягни';
-
-        container.appendChild(title);
-        container.appendChild(progressContainer);
-        container.appendChild(stats);
-        container.appendChild(buttonsContainer);
-        container.appendChild(infoText);
-        document.body.appendChild(container);
-
-        // Завантажуємо збережену позицію
-        setTimeout(loadPanelPosition, 100);
-
-        updateStatsDisplay();
-        console.log('Додано покращену панель керування з перетягуванням');
-    }
-
-    function createButton(text, color, onClick) {
-        const button = document.createElement('button');
-        button.innerHTML = text;
-        button.style.cssText = `
-            background: ${color};
-            color: white;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 11px;
-            flex: 1;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            opacity: 0.9;
-        `;
-
-        button.onmouseover = () => button.style.opacity = '1';
-        button.onmouseout = () => button.style.opacity = '0.9';
-        button.onclick = onClick;
-
-        return button;
-    }
-
-    // Ініціалізація
-    function init() {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(() => {
-                    waitForGameLoad();
-                    setTimeout(addManualButtons, 6000);
-                }, 3000);
-            });
-        } else {
-            setTimeout(() => {
-                waitForGameLoad();
-                setTimeout(addManualButtons, 6000);
-            }, 3000);
-        }
-    }
-
-    // Робимо функції доступними глобально
+    // === ГЛОБАЛЬНІ ФУНКЦІЇ ===
     window.autoClaimQuests = manualClaim;
     window.stopAutoClaim = stopAutoClaim;
     window.resetAutoCounters = resetCounters;
 
-    console.log('Farm Land Auto Quest & Ads Claim (100 Max) - Enhanced v1.33 активовано!');
-    console.log('🛡️ Захищений режим | 🎲 Випадкові затримки | 💾 Автозбереження | 👆 Перетягування');
+    // Запуск скрипта
+    console.log('🚀 Farm Land Auto Quest & Ads Claim - Ultimate Edition v1.51 активовано!');
+    console.log('🛡️ Захищений режим | 🎲 Адаптивні затримки | 💾 Автозбереження');
 
     init();
-
 })();
